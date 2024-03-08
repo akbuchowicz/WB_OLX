@@ -1,0 +1,48 @@
+# dataframe zawierający użytkowników i array itemów z którymi mieli styczność
+df_all = filtered_df.groupby('user')['item'].apply(list).reset_index(name='items')
+df_all = df_all.sort_values(by='user')
+
+# dataframe zawierąjacy użytkowników i array itemów z którymi mieli interakcje wyższego rzędu
+df_23 = filtered_df[filtered_df['label'].isin([2, 3])].groupby('user')['item'].apply(list).reset_index(name='items')
+all_users = filtered_df[['user']].drop_duplicates()
+df_23 = pd.merge(all_users, df_23, on='user', how='left')
+df_23['items'] = df_23['items'].apply(lambda x: x if isinstance(x, list) else [])
+df_23 = df_23.sort_values(by='user')
+
+
+# dataframe zawierąjacy użytkowników i array itemów które są im rekomendowane
+unique_users = filtered_df['user'].unique()
+recommendations_data = []
+
+# rekomendacje dla każdego użytkownika
+for user in unique_users:
+    recommendations = lightgcn.recommend_user(user=user, n_rec=10).get(user)
+    recommendations_data.extend([(user, recommendations)])
+
+df_rec = pd.DataFrame(recommendations_data, columns=['user', 'items'])
+df_rec = df_rec.sort_values(by='user')
+
+def find_intersection(row, df):
+    rec_items = row['items']
+    all_items = df.loc[df['user'] == row['user'], 'items'].values
+    if len(rec_items) == 0 or len(all_items) == 0:
+        return []
+    else:
+        intersection = np.intersect1d(rec_items, all_items[0])
+        return intersection
+    
+#Zawężenie rekomendowanych itemów do tych, z którymi user miał jakąkolwiek interakcję
+df_rec['items'] = df_rec.apply(lambda row: find_intersection(row, df_all), axis=1)
+
+df_match = df_rec.copy()
+
+#Wyszczególnienie itemów zarówno rekomendowanych jak i takich z którymi użytkownik miał interakcję wyższego rzędu
+df_match['items'] = df_match.apply(lambda row: find_intersection(row, df_23), axis=1)
+
+#precision
+(df_match['items'].apply(len)/df_rec['items'].apply(len)).sum(skipna=True)/len(df_match['items']) 
+matplotlib.pyplot.plot(df_match['items'].apply(len)/df_rec['items'].apply(len), 'o')
+
+#recall
+(df_match['items'].apply(len)/df_23['items'].apply(len)).sum(skipna=True)/len(df_match['items']) 
+matplotlib.pyplot.plot(df_match['items'].apply(len)/df_23['items'].apply(len), 'o')
